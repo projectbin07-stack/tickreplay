@@ -106,9 +106,8 @@ def test_identities_hold_exactly_under_random_trading() -> None:
         side = rng.choice([Side.BUY, Side.SELL])
         qty = Decimal(rng.randint(1, 4000)) / 1000  # fractional sizes force inexact averages
         fee = Decimal(rng.randint(0, 500)) / 100
-        p.apply_fill(
-            Fill(ts(i), i + 1, i + 1, symbol, side, qty, prices[symbol], fee, prices[symbol])
-        )
+        px = prices[symbol]
+        p.apply_fill(Fill(ts(i), i + 1, i + 1, symbol, side, qty, px, fee, px))
         p.mark(symbol, prices[symbol])
         check_identities(p)
         assert all(pos.cost_basis >= 0 for pos in p.positions.values())

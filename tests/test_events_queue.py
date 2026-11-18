@@ -7,6 +7,7 @@ import pytest
 
 from helpers import D, bar, flat_bar, order, tick, ts
 from tickreplay import Bar, Direction, EventQueue, Fill, Order, OrderType, Side, Signal, Trade
+from tickreplay.events import Event
 
 
 def test_events_are_immutable() -> None:
@@ -112,7 +113,7 @@ def test_queue_never_compares_event_payloads() -> None:
     # Equal timestamps with different event types would raise TypeError if the heap
     # ever fell through to comparing the events themselves.
     q = EventQueue()
-    events = [flat_bar(0, 10), tick(0, 10), Signal(ts(0), "X", Direction.LONG)]
+    events: list[Event] = [flat_bar(0, 10), tick(0, 10), Signal(ts(0), "X", Direction.LONG)]
     for e in events:
         q.push(e)
     assert [q.pop() for _ in events] == events

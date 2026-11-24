@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-24
+
+### Fixed
+
+- Fill prices were always rounded to a hard-coded tick of 0.01, for every instrument and
+  even with zero slippage, and the CLI had no way to change it. A market order on an
+  instrument quoted at 0.00001234 filled at 0.01 (about 800 times the market price), and
+  a 0.4567 buy with no slippage filled at 0.46. Any backtest of an instrument priced
+  below about 1.00, or quoted with more than two decimals, produced wrong fill prices,
+  fees, P&L and metrics in 0.1.0.
+- A fill with zero slippage is now always at its reference price, with or without a
+  tick.
+
+### Added
+
+- `--price-tick TICK` and `--price-tick SYMBOL=TICK` (repeatable) for `run`, `compare`
+  and `paper`; `EngineConfig.price_ticks` / `SimulatedExecution(price_ticks=...)` set
+  the tick per symbol in the API.
+
+### Changed
+
+- The default is now no price rounding (`EngineConfig.price_tick` defaults to `None`):
+  slipped fills use exact decimal arithmetic. Replays stay deterministic.
+- Because of this, the README quick start (`--slippage-bps 2` on the seed-42 sample)
+  prints different numbers. SMA final equity 97,438.69 -> 97,647.99, fees 2,361.38 ->
+  2,364.05, digest `980da735...` -> `64f4f6eb...`; Donchian final equity 94,648.41 ->
+  94,851.75. Passing `--price-tick 0.01` reproduces the 0.1.0 output exactly.
+
 ## [0.1.0] - 2026-11-18
 
 First release.
@@ -38,5 +66,6 @@ First release.
 
 - Live trading, exchange connectivity and any key or wallet handling are out of scope.
 
-[Unreleased]: https://github.com/projectbin07-stack/tickreplay/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/projectbin07-stack/tickreplay/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/projectbin07-stack/tickreplay/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/projectbin07-stack/tickreplay/releases/tag/v0.1.0

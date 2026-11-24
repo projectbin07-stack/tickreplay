@@ -60,6 +60,16 @@ def _param(text: str) -> tuple[str, str]:
     return key, value
 
 
+def _price_tick(text: str) -> tuple[str | None, Decimal]:
+    symbol, sep, value = text.rpartition("=")
+    if sep and not symbol:
+        raise argparse.ArgumentTypeError(f"expected TICK or SYMBOL=TICK, got {text!r}")
+    tick = _decimal(value)
+    if tick <= 0:
+        raise argparse.ArgumentTypeError(f"price tick must be positive, got {text!r}")
+    return (symbol or None), tick
+
+
 def _add_engine_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--data", required=True, type=Path, help="bar CSV file")
     p.add_argument("--cash", type=_decimal, default=Decimal(100000), help="initial cash")
@@ -80,6 +90,15 @@ def _add_engine_options(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--allocation", type=_decimal, default=Decimal("0.95"))
     p.add_argument("--qty-step", type=_decimal, default=Decimal(1), help="quantity increment")
+    p.add_argument(
+        "--price-tick",
+        action="append",
+        type=_price_tick,
+        default=[],
+        metavar="[SYMBOL=]TICK",
+        help="round slipped fills to this tick, for all symbols or one symbol; "
+        "repeatable; default: no rounding",
+    )
     p.add_argument("--max-position", type=_decimal, default=None, help="max units per symbol")
     p.add_argument("--max-gross-exposure", type=_decimal, default=None, help="multiple of equity")
     p.add_argument("--risk-per-trade", type=_decimal, default=None, help="fraction of equity")
@@ -149,12 +168,17 @@ def _config(args: argparse.Namespace) -> EngineConfig:
         slippage = FixedBpsSlippage(args.slippage_bps)
     else:
         slippage = NoSlippage()
+    default_ticks = [tick for symbol, tick in args.price_tick if symbol is None]
+    if len(default_ticks) > 1:
+        raise ValueError("--price-tick without a symbol was given more than once")
     return EngineConfig(
         initial_cash=args.cash,
         fees=FeeModel(fixed=args.fee_fixed, rate_bps=args.fee_bps),
         slippage=slippage,
         max_participation=args.participation if args.participation > 0 else None,
         qty_step=args.qty_step,
+        price_tick=default_ticks[0] if default_ticks else None,
+        price_ticks={symbol: tick for symbol, tick in args.price_tick if symbol is not None},
         signal_allocation=args.allocation,
         risk=RiskConfig(
             max_position=args.max_position,

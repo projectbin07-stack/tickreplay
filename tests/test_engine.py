@@ -22,6 +22,7 @@ from tickreplay import (
     RiskConfig,
     Side,
     Signal,
+    SimulatedExecution,
     Strategy,
     StrategyContext,
     Trade,
@@ -466,3 +467,14 @@ def test_event_types_reach_the_listener() -> None:
         bars_from_closes([10, 10, 10])
     )
     assert kinds == {Bar, Signal, Order, Fill}
+
+
+def test_engine_config_passes_price_ticks_to_the_simulator() -> None:
+    config = EngineConfig(price_tick=D("0.01"), price_ticks={"X": D("0.001")})
+    engine = Engine(build("sma"), config)
+    assert isinstance(engine.execution, SimulatedExecution)
+    assert engine.execution.price_tick_for("X") == D("0.001")
+    assert engine.execution.price_tick_for("Y") == D("0.01")
+    assert EngineConfig().price_tick is None
+    with pytest.raises(ValueError, match="price tick for X"):
+        EngineConfig(price_ticks={"X": D(0)})

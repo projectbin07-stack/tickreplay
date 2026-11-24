@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import enum
 import hashlib
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -38,7 +38,12 @@ from tickreplay.events import (
     Signal,
     Trade,
 )
-from tickreplay.execution import ExecutionHandler, SimulatedExecution, WorkingOrder
+from tickreplay.execution import (
+    ExecutionHandler,
+    SimulatedExecution,
+    WorkingOrder,
+    check_price_ticks,
+)
 from tickreplay.portfolio import EquityPoint, Portfolio, RoundTrip
 from tickreplay.risk import RiskConfig, RiskManager, floor_to_step, size_for_risk
 from tickreplay.strategy import Strategy
@@ -61,13 +66,18 @@ class EngineConfig:
 
     ``signal_allocation`` is the fraction of equity committed when a signal is sized
     without a stop price; it also caps risk-sized signals.
+
+    ``price_tick`` rounds slipped MARKET and STOP fills of every symbol to that tick;
+    ``price_ticks`` sets it per symbol and takes precedence. With neither, fill prices
+    are not rounded.
     """
 
     initial_cash: Decimal = Decimal(100000)
     fees: FeeModel = field(default_factory=FeeModel)
     slippage: SlippageModel = field(default_factory=NoSlippage)
     max_participation: Decimal | None = Decimal("0.1")
-    price_tick: Decimal = Decimal("0.01")
+    price_tick: Decimal | None = None
+    price_ticks: Mapping[str, Decimal] = field(default_factory=dict)
     qty_step: Decimal = Decimal(1)
     signal_allocation: Decimal = Decimal("0.95")
     risk: RiskConfig = field(default_factory=RiskConfig)
@@ -77,6 +87,7 @@ class EngineConfig:
             raise ValueError("initial_cash must be positive")
         if not (0 < self.signal_allocation <= 1):
             raise ValueError("signal_allocation must be in (0, 1]")
+        check_price_ticks(self.price_tick, self.price_ticks)
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +207,7 @@ class Engine:
                 slippage=self.config.slippage,
                 max_participation=self.config.max_participation,
                 price_tick=self.config.price_tick,
+                price_ticks=self.config.price_ticks,
                 qty_step=self.config.qty_step,
             )
         )

@@ -221,6 +221,36 @@ def test_cli_run_options_change_the_configuration(
     assert plain.split("digest: ")[1] != tuned.split("digest: ")[1]
 
 
+def test_cli_price_tick_restores_cent_rounding_and_is_deterministic(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The README quick start: v0.1.0 always rounded to 0.01 and printed this digest.
+    data = tmp_path / "demo.csv"
+    assert main(["gen", "--seed", "42", "--bars", "1500", "--out", str(data)]) == 0
+    base = ["run", "--strategy", "sma", "--data", str(data), "--fee-bps", "5"]
+    base += ["--slippage-bps", "2"]
+    v010 = "980da7354c1da3d104df73d4ca77b29f90a5157b07a47b5c1eb3899509444625"
+    digests = []
+    for extra in ([], [], ["--price-tick", "0.01"], ["--price-tick", "SYN-GBM=0.01"]):
+        capsys.readouterr()
+        assert main([*base, *extra]) == 0
+        digests.append(capsys.readouterr().out.split("digest: ")[1].split()[0])
+    unrounded, again, cent, per_symbol = digests
+    assert unrounded == again  # no rounding is still a deterministic replay
+    assert cent == per_symbol == v010
+    assert unrounded != v010
+
+
+def test_cli_rejects_bad_price_ticks(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    data = gen(tmp_path)
+    base = ["run", "--strategy", "sma", "--data", str(data)]
+    for bad in ("0", "X=-1", "=0.01", "X=abc"):
+        with pytest.raises(SystemExit):
+            main([*base, "--price-tick", bad])
+    assert main([*base, "--price-tick", "0.01", "--price-tick", "0.1"]) == 2
+    assert "more than once" in capsys.readouterr().err
+
+
 def test_cli_compare_lists_each_strategy(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -88,15 +88,26 @@ class VolumeParticipationSlippage:
         )
 
 
-def apply_slippage(price: Decimal, side: Side, bps: Decimal, tick: Decimal) -> Decimal:
-    """Move ``price`` against the trader by ``bps`` and round to the price tick.
+def apply_slippage(
+    price: Decimal, side: Side, bps: Decimal, tick: Decimal | None = None
+) -> Decimal:
+    """Move ``price`` against the trader by ``bps``, rounding to ``tick`` if one is given.
 
-    Buys are rounded up and sells rounded down, so rounding never favours the trader.
-    The result is floored at one tick so a sell can never fill at or below zero.
+    * Zero slippage returns ``price`` unchanged, with or without a tick: a fill with no
+      slippage happens at the reference price taken from the data.
+    * Without a tick the result is exact decimal arithmetic (no rounding at all), so the
+      fill stays correct for instruments of any price scale.
+    * With a tick, buys are rounded up and sells rounded down, so rounding never favours
+      the trader, and a sell is floored at one tick so it can never fill at or below zero.
     """
+    if bps == 0:
+        return price
+    raw = price * (_BPS + bps if side is Side.BUY else _BPS - bps) / _BPS
+    if tick is None:
+        if raw <= 0:
+            raise ValueError(f"{bps} bps of slippage would move a sell fill to or below zero")
+        return raw
     if side is Side.BUY:
-        raw = price * (_BPS + bps) / _BPS
         return (raw / tick).to_integral_value(rounding=ROUND_CEILING) * tick
-    raw = price * (_BPS - bps) / _BPS
     rounded = (raw / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
     return max(rounded, tick)

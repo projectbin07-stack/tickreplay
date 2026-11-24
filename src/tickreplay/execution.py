@@ -15,12 +15,17 @@ Fill rules of the simulator (``ts`` is the market event being matched):
 * STOP buy: if the bar opens at or above the stop it fills at the open (gap), else if
   the high reaches the stop it fills at the stop. (Mirrored for sells.)
 * Slippage is applied to MARKET and STOP fills, never to LIMIT fills.
+* Prices are not rounded unless a price tick is configured, either one ``price_tick``
+  for every symbol or per symbol through ``price_ticks``. With a tick, slipped MARKET and
+  STOP fills are rounded against the trader; a fill with zero slippage is never moved
+  off its reference price.
 * With ``max_participation`` set, all fills on one bar together cannot exceed that
   fraction of the bar's volume; the remainder of an order keeps working.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_FLOOR, Decimal
@@ -67,6 +72,17 @@ class ExecutionHandler(Protocol):
         ...
 
 
+def check_price_ticks(
+    price_tick: Decimal | None, price_ticks: Mapping[str, Decimal] | None
+) -> None:
+    """Raise ``ValueError`` unless every configured price tick is positive."""
+    if price_tick is not None and price_tick <= 0:
+        raise ValueError("price_tick must be positive")
+    for symbol, tick in (price_ticks or {}).items():
+        if tick <= 0:
+            raise ValueError(f"price tick for {symbol} must be positive")
+
+
 class _Resting:
     __slots__ = ("order", "remaining", "triggered")
 
@@ -85,20 +101,27 @@ class SimulatedExecution:
         fees: FeeModel | None = None,
         slippage: SlippageModel | None = None,
         max_participation: Decimal | None = None,
-        price_tick: Decimal = Decimal("0.01"),
+        price_tick: Decimal | None = None,
+        price_ticks: Mapping[str, Decimal] | None = None,
         qty_step: Decimal = Decimal(1),
     ) -> None:
         if max_participation is not None and not (0 < max_participation <= 1):
             raise ValueError("max_participation must be in (0, 1]")
-        if price_tick <= 0 or qty_step <= 0:
-            raise ValueError("price_tick and qty_step must be positive")
+        check_price_ticks(price_tick, price_ticks)
+        if qty_step <= 0:
+            raise ValueError("qty_step must be positive")
         self._fees = fees if fees is not None else FeeModel()
         self._slippage: SlippageModel = slippage if slippage is not None else NoSlippage()
         self._max_participation = max_participation
         self._tick = price_tick
+        self._ticks = dict(price_ticks) if price_ticks is not None else {}
         self._step = qty_step
         self._book: dict[int, _Resting] = {}
         self._next_fill_id = 1
+
+    def price_tick_for(self, symbol: str) -> Decimal | None:
+        """Tick used to round slipped fills of ``symbol``; ``None`` means no rounding."""
+        return self._ticks.get(symbol, self._tick)
 
     # -- order management -------------------------------------------------------------
 
@@ -196,7 +219,7 @@ class SimulatedExecution:
                 price = reference
             else:
                 bps = self._slippage.bps(quantity, volume)
-                price = apply_slippage(reference, order.side, bps, self._tick)
+                price = apply_slippage(reference, order.side, bps, self.price_tick_for(symbol))
             fill = Fill(
                 ts=ts,
                 fill_id=self._next_fill_id,

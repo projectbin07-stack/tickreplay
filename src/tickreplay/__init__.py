@@ -17,7 +17,7 @@ from tickreplay.portfolio import EquityPoint, Portfolio, Position, RoundTrip
 from tickreplay.risk import RiskConfig, RiskManager, size_for_risk
 from tickreplay.strategy import Strategy, StrategyContext
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "Bar",

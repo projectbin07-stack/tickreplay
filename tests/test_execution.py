@@ -220,3 +220,57 @@ def test_constructor_validation() -> None:
         SimulatedExecution(max_participation=Decimal("1.5"))
     with pytest.raises(ValueError):
         SimulatedExecution(price_tick=Decimal(0))
+    with pytest.raises(ValueError, match="price tick for A"):
+        SimulatedExecution(price_ticks={"A": Decimal("-0.01")})
+    with pytest.raises(ValueError):
+        SimulatedExecution(qty_step=Decimal(0))
+
+
+# -- price precision ---------------------------------------------------------------------
+
+
+def test_sub_cent_instrument_fills_at_its_own_price_by_default() -> None:
+    # Regression: v0.1.0 rounded every market fill to 0.01, so this filled at 0.01.
+    ex = SimulatedExecution()
+    ex.submit(order(0, Side.SELL, 1000, order_id=1))
+    ex.submit(order(0, Side.BUY, 1000, order_id=2))
+    fills = ex.on_bar(bar(1, "0.00001234", "0.00001300", "0.00001200", "0.00001250", 10**9))
+    assert [f.price for f in fills] == [D("0.00001234"), D("0.00001234")]
+    assert all(f.reference_price == f.price for f in fills)
+
+
+def test_zero_slippage_never_moves_a_fill_even_with_a_tick() -> None:
+    # Regression: v0.1.0 filled a 0.4567 buy at 0.46 with no slippage configured.
+    for ex in (SimulatedExecution(), SimulatedExecution(price_tick=TICK)):
+        ex.submit(order(0, Side.BUY, 1, order_id=1))
+        ex.submit(order(0, Side.SELL, 1, OrderType.STOP, order_id=2, stop="0.4555"))
+        fills = ex.on_bar(bar(1, "0.4567", "0.46", "0.45", "0.455", 10**6))
+        assert [f.price for f in fills] == [D("0.4567"), D("0.4555")]
+
+
+def test_slippage_without_a_tick_is_exact() -> None:
+    assert apply_slippage(D("0.4567"), Side.BUY, D(2)) == D("0.45679134")
+    assert apply_slippage(D("0.4567"), Side.SELL, D(2)) == D("0.45660866")
+    assert apply_slippage(D("0.00001234"), Side.BUY, D(10)) == D("0.00001235234")
+    assert apply_slippage(D("12.34"), Side.SELL, D(0)) == D("12.34")
+    with pytest.raises(ValueError, match="or below zero"):
+        apply_slippage(D(1), Side.SELL, D(10000))
+
+
+def test_price_tick_per_symbol_overrides_the_default() -> None:
+    ex = SimulatedExecution(
+        slippage=FixedBpsSlippage(D(1)),
+        price_tick=TICK,
+        price_ticks={"FINE": D("0.0001"), "COARSE": D("0.5")},
+    )
+    assert ex.price_tick_for("FINE") == D("0.0001")
+    assert ex.price_tick_for("OTHER") == TICK
+    for i, symbol in enumerate(("FINE", "COARSE", "OTHER"), start=1):
+        ex.submit(order(0, Side.BUY, 1, order_id=i, symbol=symbol))
+    prices = {}
+    for symbol in ("FINE", "COARSE", "OTHER"):
+        (f,) = ex.on_bar(flat_bar(1, "33.33", symbol=symbol))
+        prices[symbol] = f.price
+    # 33.33 * 1.0001 = 33.333333, rounded up to each symbol's tick
+    assert prices == {"FINE": D("33.3334"), "COARSE": D("33.5"), "OTHER": D("33.34")}
+    assert SimulatedExecution(price_ticks={"FINE": D("0.0001")}).price_tick_for("X") is None
